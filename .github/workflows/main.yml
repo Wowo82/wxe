@@ -1,0 +1,207 @@
+name: Wex JSON Upload
+
+on:
+  push:
+    branches:
+      - wxe
+  workflow_dispatch:
+  schedule:
+    - cron: '*/50 * * * *'
+
+env:
+  ORIGINAL_JSON: "9280.json"
+  FINAL_JSON: "wex.json"
+
+jobs:
+  modify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 配置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get install -y jq curl
+
+      - name: 清理历史记录
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
+        run: |
+          set -euo pipefail
+          RUNS=$(curl -sLf --retry 3 -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/${{ github.repository }}/actions/runs?per_page=100" || true)
+          OLD_RUNS=$(echo "$RUNS" | jq -r '.workflow_runs | sort_by(.run_number) | reverse | .[1:] | map(select(.status == "completed")) | .[] | .id' 2>/dev/null)
+          [ -n "$OLD_RUNS" ] && echo "🗑️ 清理历史记录" && echo "$OLD_RUNS" | xargs -I{} curl -sLf -X DELETE -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/${{ github.repository }}/actions/runs/{}"
+
+      - name: 下载原始JSON数据
+        run: |
+          set -euxo pipefail
+          curl -fsSL --retry 1 -o ${{ env.ORIGINAL_JSON }} "https://9280.kstore.space/wex.json"
+          jq empty ${{ env.ORIGINAL_JSON }}
+
+      - name: 提取Spider内容
+        if: github.event_name != 'workflow_dispatch'
+        id: spider
+        run: |
+          set -euxo pipefail
+          SPIDER_CONTENT=$(jq -e -r '.spider // "" | gsub("\n"; "\\n")' ${{ env.ORIGINAL_JSON }})
+          echo "SPIDER_CONTENT=$SPIDER_CONTENT" >> $GITHUB_ENV
+
+      - name: 获取历史Spider
+        if: github.event_name != 'workflow_dispatch'
+        id: history
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
+        run: |
+          set -euxo pipefail
+          RESP=$(curl -sfL --retry 3 -H "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/latest" || true)
+          
+          PREVIOUS_SPIDER=$(jq -r '
+            if .message == "Not Found" then
+              "no_history"
+            else
+              (.body | split("Spider内容: ")[1] // "")
+            end' <<< "$RESP")
+
+          echo "PREVIOUS_SPIDER=$PREVIOUS_SPIDER" >> $GITHUB_ENV
+
+      - name: 内容对比
+        id: comparator
+        run: |
+          set -euxo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            if [[ "$SPIDER_CONTENT" != "$PREVIOUS_SPIDER" ]]; then
+              echo "changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "changed=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: 处理JSON数据
+        if: steps.comparator.outputs.changed == 'true'
+        env:
+          SWITCH_DOUBAN: ${{ secrets.SWITCH_DOUBAN }}
+          DOUBAN_ext: ${{ secrets.DOUBAN_ext }}
+          key_DELETE: ${{ secrets.key_DELETE }}
+          EVENT_TYPE: ${{ github.event_name }}  # 新增事件类型环境变量
+        run: |
+          set -euxo pipefail
+          python3 <<EOF
+          import json
+          import os
+          from datetime import datetime, timezone, timedelta
+
+          INPUT_FILE = "${{ env.ORIGINAL_JSON }}"
+          OUTPUT_FILE = "${{ env.FINAL_JSON }}"
+
+          NAME_MAPPING = {
+              "Douban": "🐮【推荐】🐮",
+              "Wexokconfig": "🐮配置中心🐮",
+              "Wexnullname": "💓观影┃4K💓"
+          }
+
+          PRIORITY_MAP = {"Douban": 1, "Wexokconfig": 2, "玩偶": 3}
+
+          key_delete = json.loads(os.environ.get("key_DELETE", "[]"))
+          switch_douban = os.environ.get("SWITCH_DOUBAN", "false").lower() == "true"
+          douban_ext = os.environ.get("DOUBAN_ext", "")
+          event_type = os.environ.get("EVENT_TYPE", "")  # 获取事件类型
+
+          special_mods = {}
+          if switch_douban and douban_ext:
+              special_mods["Douban"] = {
+                  "name": NAME_MAPPING.get("Douban", "Douban"),
+                  "ext": douban_ext
+              }
+
+          try:
+              with open(INPUT_FILE, "r", encoding="utf-8") as f:
+                  data = json.load(f)
+
+              data.pop("doh", None)
+              data.pop("lives", None)
+
+              sites = data.get("sites", [])
+              processed_sites = []
+              push_agent = None
+              wexconfig = None
+
+              for site in sites:
+                  key = site.get("key")
+
+                  if key in key_delete:
+                      continue
+
+                  if key in special_mods:
+                      site.update(special_mods[key])
+                      processed_sites.append(site)
+                      continue
+
+                  # 修改名称逻辑：仅非手动触发时添加日期
+                  if key in NAME_MAPPING:
+                      new_name = NAME_MAPPING[key]
+                      if key == "Douban" and event_type != "workflow_dispatch":
+                          current_date = datetime.now(timezone(timedelta(hours=8))).strftime("%m·%d")
+                          new_name += f"{current_date}"
+                      site["name"] = new_name
+
+                  if key == "push_agent":
+                      push_agent = site
+                      continue
+                  if key == "Wexconfig":
+                      wexconfig = site
+                      continue
+
+                  processed_sites.append(site)
+
+              processed_sites.sort(key=lambda x: PRIORITY_MAP.get(x.get("key"), 4))
+              if wexconfig:
+                  processed_sites.append(wexconfig)
+              if push_agent:
+                  processed_sites.append(push_agent)
+
+              data["sites"] = processed_sites
+
+              with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+                  json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=False)
+
+              print(f"✅ 处理完成，输出文件：{OUTPUT_FILE}")
+
+          except json.JSONDecodeError as e:
+              print(f"❌ JSON解析错误: {e}")
+              exit(1)
+          except Exception as e:
+              print(f"❌ 处理失败: {str(e)}")
+              exit(1)
+          EOF
+
+      - name: 上传至凯速平台
+        if: steps.comparator.outputs.changed == 'true'
+        run: |
+          set -euxo pipefail
+          echo "📤 开始上传至凯速平台: ${{ env.FINAL_JSON }}"
+          curl -sSf --retry 3 \
+            -F "file=@${{ env.FINAL_JSON }}" \
+            "https://upload.kstore.space/upload/${{ secrets.KSTORE_ID }}?access_token=${{ secrets.KSTORE_TOKEN }}"
+
+      - name: 创建版本发布
+        if: steps.comparator.outputs.changed == 'true' && github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
+        run: |
+          set -euxo pipefail
+          TIMESTAMP=$(date +%s)
+          gh release create "v$TIMESTAMP" \
+            --title "$(date +%F)" \
+            --notes "Spider内容: $SPIDER_CONTENT" \
+            ${{ env.ORIGINAL_JSON }} \
+            --target ${{ github.sha }}
