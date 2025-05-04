@@ -3,7 +3,7 @@ name: Wex JSON Upload
 on:
   push:
     branches:
-      - wxe
+      - wex
   workflow_dispatch:
   schedule:
     - cron: '*/50 * * * *'
@@ -11,10 +11,17 @@ on:
 env:
   ORIGINAL_JSON: "9280.json"
   FINAL_JSON: "wex.json"
+  SWITCH_DOUBAN: ${{ secrets.SWITCH_DOUBAN }}
+  DOUBAN_ext: ${{ secrets.DOUBAN_ext }}
+  key_DELETE: ${{ secrets.key_DELETE }}
+  KSTORE_ID: ${{ secrets.KSTORE_ID }}
+  KSTORE_TOKEN: ${{ secrets.KSTORE_TOKEN }}
 
 jobs:
   modify:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
     steps:
       - name: 检出仓库
         uses: actions/checkout@v4
@@ -31,8 +38,6 @@ jobs:
           sudo apt-get install -y jq curl
 
       - name: 清理历史记录
-        env:
-          GH_TOKEN: ${{ secrets.PAT }}
         run: |
           set -euo pipefail
           RUNS=$(curl -sLf --retry 3 -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/${{ github.repository }}/actions/runs?per_page=100" || true)
@@ -56,11 +61,9 @@ jobs:
       - name: 获取历史Spider
         if: github.event_name != 'workflow_dispatch'
         id: history
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT }}
         run: |
           set -euxo pipefail
-          RESP=$(curl -sfL --retry 3 -H "Authorization: Bearer $GITHUB_TOKEN" \
+          RESP=$(curl -sfL --retry 3 -H "Authorization: Bearer $GH_TOKEN" \
             "https://api.github.com/repos/${{ github.repository }}/releases/latest" || true)
           
           PREVIOUS_SPIDER=$(jq -r '
@@ -88,11 +91,6 @@ jobs:
 
       - name: 处理JSON数据
         if: steps.comparator.outputs.changed == 'true'
-        env:
-          SWITCH_DOUBAN: ${{ secrets.SWITCH_DOUBAN }}
-          DOUBAN_ext: ${{ secrets.DOUBAN_ext }}
-          key_DELETE: ${{ secrets.key_DELETE }}
-          EVENT_TYPE: ${{ github.event_name }}  # 新增事件类型环境变量
         run: |
           set -euxo pipefail
           python3 <<EOF
@@ -195,8 +193,6 @@ jobs:
 
       - name: 创建版本发布
         if: steps.comparator.outputs.changed == 'true' && github.event_name != 'workflow_dispatch'
-        env:
-          GH_TOKEN: ${{ secrets.PAT }}
         run: |
           set -euxo pipefail
           TIMESTAMP=$(date +%s)
