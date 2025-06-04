@@ -125,6 +125,19 @@ jobs:
               with open(INPUT_FILE, "r", encoding="utf-8") as f:
                   data = json.load(f)
 
+              # 新增：处理rules部分，添加hdhive.online到proxy规则的hosts中
+              if "rules" in data:
+                  for rule in data["rules"]:
+                      if rule.get("name") == "proxy" and "hosts" in rule:
+                          if "hdhive.online" not in rule["hosts"]:
+                              rule["hosts"].append("hdhive.online")
+                              print("✅ 已添加 hdhive.online 到proxy规则的hosts中")
+                      # 支持正则匹配规则的添加（可选）
+                      elif rule.get("name") == "proxy" and "pattern" in rule and "hdhive.online" not in rule["pattern"]:
+                          if not any("hdhive.online" in p for p in rule["pattern"]):
+                              rule["pattern"].append("hdhive.online")
+                              print("✅ 已添加 hdhive.online 到proxy规则的pattern中")
+
               data.pop("doh", None)
               data.pop("lives", None)
 
@@ -147,7 +160,7 @@ jobs:
                   # 修改名称逻辑：仅非手动触发时添加日期
                   if key in NAME_MAPPING:
                       new_name = NAME_MAPPING[key]
-                      if key == "Douban" and event_type != "workflow_dispatch":
+                      if key == "push_agent" and event_type != "workflow_dispatch":
                           current_date = datetime.now(timezone(timedelta(hours=8))).strftime("%m·%d")
                           new_name += f"{current_date}"
                       site["name"] = new_name
