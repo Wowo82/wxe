@@ -16,12 +16,14 @@ env:
   key_DELETE: ${{ secrets.key_DELETE }}
   KSTORE_ID: ${{ secrets.KSTORE_ID }}
   KSTORE_TOKEN: ${{ secrets.KSTORE_TOKEN }}
+  # 新增：Emby数量控制变量（默认1，从secrets读取）
+  EMBY_COUNT: ${{ secrets.EMBY_COUNT }}
 
 jobs:
   modify:
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      GH_TOKEN: ${{ secrets.PAT }}
     steps:
       - name: 检出仓库
         uses: actions/checkout@v4
@@ -101,18 +103,30 @@ jobs:
           INPUT_FILE = "${{ env.ORIGINAL_JSON }}"
           OUTPUT_FILE = "${{ env.FINAL_JSON }}"
 
+          # 读取Emby数量配置（默认1，转换为整数）
+          try:
+              emby_count = int(os.environ.get("EMBY_COUNT", "1"))
+          except ValueError:
+              print("⚠️ EMBY_COUNT不是有效数字，使用默认值1")
+              emby_count = 1
+
           NAME_MAPPING = {
               "Douban": "🐮【推荐】🐮",
               "Wexokconfig": "🐮配置中心🐮",
-              "Wexnullname": "💓观影┃4K💓"
+              "Wexnullname": "💓观影┃4K💓",
+              "push_agent": "推送"
           }
 
-          PRIORITY_MAP = {"Douban": 1, "Wexokconfig": 2, "玩偶": 3}
+          PRIORITY_MAP = {
+              "Douban": 1,
+              "Wexokconfig": 2,
+              "玩偶": 3
+          }
 
           key_delete = json.loads(os.environ.get("key_DELETE", "[]"))
           switch_douban = os.environ.get("SWITCH_DOUBAN", "false").lower() == "true"
           douban_ext = os.environ.get("DOUBAN_ext", "")
-          event_type = os.environ.get("EVENT_TYPE", "")  # 获取事件类型
+          event_type = os.environ.get("EVENT_TYPE", "")
 
           special_mods = {}
           if switch_douban and douban_ext:
@@ -125,19 +139,19 @@ jobs:
               with open(INPUT_FILE, "r", encoding="utf-8") as f:
                   data = json.load(f)
 
-              # 新增：处理rules部分，添加hdhive.online到proxy规则的hosts中
+              # 处理proxy规则
               if "rules" in data:
                   for rule in data["rules"]:
                       if rule.get("name") == "proxy" and "hosts" in rule:
                           if "hdhive.online" not in rule["hosts"]:
                               rule["hosts"].append("hdhive.online")
                               print("✅ 已添加 hdhive.online 到proxy规则的hosts中")
-                      # 支持正则匹配规则的添加（可选）
-                      elif rule.get("name") == "proxy" and "pattern" in rule and "hdhive.online" not in rule["pattern"]:
+                      elif rule.get("name") == "proxy" and "pattern" in rule:
                           if not any("hdhive.online" in p for p in rule["pattern"]):
                               rule["pattern"].append("hdhive.online")
                               print("✅ 已添加 hdhive.online 到proxy规则的pattern中")
 
+              # 移除冗余字段
               data.pop("doh", None)
               data.pop("lives", None)
 
@@ -149,15 +163,27 @@ jobs:
               for site in sites:
                   key = site.get("key")
 
+                  # 根据emby_count决定是否保留原Wexemby
+                  if key == "Wexemby":
+                      if emby_count > 2:
+                          print(f"🔍 EMBY_COUNT={emby_count}，跳过原Emby配置")
+                          continue  # 数量>2时删除原配置
+                      else:
+                          print(f"🔍 EMBY_COUNT={emby_count}，保留原Emby配置")
+                          processed_sites.append(site)  # 数量=1时保留原配置
+                          continue
+
+                  # 过滤需要删除的key
                   if key in key_delete:
                       continue
 
+                  # 应用特殊修改
                   if key in special_mods:
                       site.update(special_mods[key])
                       processed_sites.append(site)
                       continue
 
-                  # 修改名称逻辑：仅非手动触发时添加日期
+                  # 名称映射处理
                   if key in NAME_MAPPING:
                       new_name = NAME_MAPPING[key]
                       if key == "push_agent" and event_type != "workflow_dispatch":
@@ -165,6 +191,7 @@ jobs:
                           new_name += f"{current_date}"
                       site["name"] = new_name
 
+                  # 暂存push_agent和Wexconfig
                   if key == "push_agent":
                       push_agent = site
                       continue
@@ -174,14 +201,35 @@ jobs:
 
                   processed_sites.append(site)
 
+              # 当emby_count>2时，生成对应数量的新Emby配置
+              if emby_count > 2:
+                  print(f"📌 生成{emby_count}个新Emby配置")
+                  for i in range(1, emby_count + 1):
+                      new_emby = {
+                          "key": f"Wexdiyemby{str(i).zfill(3)}",
+                          "name": f"🀄️emby{i}┃4K🀄️",
+                          "type": 3,
+                          "api": "csp_WexdiyembyGuard",
+                          "searchable": 1,
+                          "changeable": 1,
+                          "ext": {
+                              "embynumber": i
+                          }
+                      }
+                      processed_sites.append(new_emby)
+                      print(f"✅ 添加第{i}个新Emby配置: {new_emby['key']}")
+
+              # 按优先级排序
               processed_sites.sort(key=lambda x: PRIORITY_MAP.get(x.get("key"), 4))
+
+              # 最后添加Wexconfig和push_agent
               if wexconfig:
                   processed_sites.append(wexconfig)
               if push_agent:
                   processed_sites.append(push_agent)
 
+              # 保存处理后的JSON
               data["sites"] = processed_sites
-
               with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
                   json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=False)
 
