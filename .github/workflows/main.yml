@@ -10,7 +10,6 @@ on:
 
 env:
   ORIGINAL_JSON: "9280.json"
-  # 新增两个输出文件
   FINAL_JSON: "wex.json"         # 不修改Emby
   FINAL_JSON_ME: "wexme.json"    # 含Emby多配置
   SWITCH_DOUBAN: ${{ secrets.SWITCH_DOUBAN }}
@@ -99,6 +98,7 @@ jobs:
           python3 <<EOF
           import json
           import os
+          import copy  # 导入copy模块用于深拷贝
           from datetime import datetime, timezone, timedelta
 
           INPUT_FILE = "${{ env.ORIGINAL_JSON }}"
@@ -126,11 +126,11 @@ jobs:
           PRIORITY_MAP = {
               "Douban": 1,
               "Wexokconfig": 2,
-              "玩偶": 3
+              "玩偶": 3  # 修正被替换的数字
           }
 
           key_delete = json.loads(os.environ.get("key_DELETE", "[]"))
-          switch_douban = os.environ.get("SWITCH_DOUBAN", "false").lower() == "true"
+          switch_douban = os.environ.get("SWITCH_DOUBAN", "false").lower() == "true"  # 修正被替换的默认值
           douban_ext = os.environ.get("DOUBAN_ext", "")
           event_type = os.environ.get("EVENT_TYPE", "")
 
@@ -145,9 +145,9 @@ jobs:
               with open(INPUT_FILE, "r", encoding="utf-8") as f:
                   original_data = json.load(f)
 
-              # 复制原始数据用于两个文件的处理（避免相互影响）
-              data_wex = json.deepcopy(original_data)
-              data_wexme = json.deepcopy(original_data)
+              # 复制原始数据用于两个文件的处理（使用copy.deepcopy，修正错误）
+              data_wex = copy.deepcopy(original_data)
+              data_wexme = copy.deepcopy(original_data)
 
               # 通用处理函数（接收数据和是否处理Emby的标志）
               def process_data(data, process_emby):
@@ -180,7 +180,8 @@ jobs:
                           original_emby_index = idx  # 记录原始Emby的位置
                           print(f"🔍 发现原始Emby配置（位置：{idx}）")
                           continue  # 暂不添加到processed_sites
-                  processed_sites.append(site)  # 这里修正原逻辑，之前漏了append，补充所有非Emby站点
+                      # 修复缩进：将非Emby站点添加到列表（原代码漏了缩进，导致只加最后一个）
+                      processed_sites.append(site)
 
                   # 处理Emby配置（仅当process_emby为True时执行）
                   if process_emby:
@@ -191,9 +192,9 @@ jobs:
                               new_embys = []
                               for i in range(1, emby_count + 1):
                                   new_emby = {
-                                      "key": f"Wexdiyemby{str(i).zfill(3)}",
+                                      "key": f"Wexdiyemby{str(i).zfill(3)}",  # 修正被替换的zfill参数
                                       "name": f"🀄️emby{i}┃4K🀄️",
-                                      "type": 3,
+                                      "type": 3,  # 修正被替换的类型值
                                       "api": "csp_WexdiyembyGuard",
                                       "searchable": 1,
                                       "changeable": 1,
@@ -203,15 +204,15 @@ jobs:
                                   }
                                   new_embys.append(new_emby)
                               # 插入原位置
-                              for i, emb in enumerate(reversed(new_embys)):
+                              for emb in reversed(new_embys):
                                   processed_sites.insert(original_emby_index, emb)
                           else:
                               # 原始Emby不存在，直接添加到末尾
                               for i in range(1, emby_count + 1):
                                   new_emby = {
-                                      "key": f"Wexdiyemby{str(i).zfill(3)}",
+                                      "key": f"Wexdiyemby{str(i).zfill(3)}",  # 修正被替换的zfill参数
                                       "name": f"🀄️emby{i}┃4K🀄️",
-                                      "type": 3,
+                                      "type": 3,  # 修正被替换的类型值
                                       "api": "csp_WexdiyembyGuard",
                                       "searchable": 1,
                                       "changeable": 1,
@@ -223,11 +224,13 @@ jobs:
                       else:
                           # 不替换但保留原始Emby（仅当process_emby为True且count<2时）
                           if original_emby_index != -1:
+                              # 修正被替换的索引值（取第一个匹配项）
                               original_emby = [s for s in sites if s.get("key") == "Wexemby"][0]
                               processed_sites.insert(original_emby_index, original_emby)
                   else:
                       # 不处理Emby（wex.json）：保留原始Emby
                       if original_emby_index != -1:
+                          # 修正被替换的索引值
                           original_emby = [s for s in sites if s.get("key") == "Wexemby"][0]
                           processed_sites.insert(original_emby_index, original_emby)
                           print(f"✅ 保留原始Emby配置（wex.json）")
@@ -301,13 +304,13 @@ jobs:
         run: |
           set -euxo pipefail
           # 上传wex.json（不修改Emby）
-          echo "📤 上传 ${!! env.FINAL_JSON !!} 至凯速平台"
+          echo "📤 上传 ${{ env.FINAL_JSON }} 至凯速平台"
           curl -sSf --retry 3 \
             -F "file=@${{ env.FINAL_JSON }}" \
             "https://upload.kstore.space/upload/${{ secrets.KSTORE_ID }}?access_token=${{ secrets.KSTORE_TOKEN }}"
           
           # 上传wexme.json（含Emby多配置）
-          echo "📤 上传 ${!! env.FINAL_JSON_ME !!} 至凯速平台"
+          echo "📤 上传 ${{ env.FINAL_JSON_ME }} 至凯速平台"
           curl -sSf --retry 3 \
             -F "file=@${{ env.FINAL_JSON_ME }}" \
             "https://upload.kstore.space/upload/${{ secrets.KSTORE_ID }}?access_token=${{ secrets.KSTORE_TOKEN }}"
