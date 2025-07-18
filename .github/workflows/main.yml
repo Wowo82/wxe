@@ -16,7 +16,7 @@ env:
   key_DELETE: ${{ secrets.key_DELETE }}
   KSTORE_ID: ${{ secrets.KSTORE_ID }}
   KSTORE_TOKEN: ${{ secrets.KSTORE_TOKEN }}
-  # 新增：Emby数量控制变量（默认1，从secrets读取）
+  # 新增：Emby数量控制变量（默认不设置，通过secrets配置）
   EMBY_COUNT: ${{ secrets.EMBY_COUNT }}
 
 jobs:
@@ -103,12 +103,16 @@ jobs:
           INPUT_FILE = "${{ env.ORIGINAL_JSON }}"
           OUTPUT_FILE = "${{ env.FINAL_JSON }}"
 
-          # 读取Emby数量配置（默认1，转换为整数）
+          # 读取并处理EMBY_COUNT（无配置/0/1时跳过添加新配置）
+          emby_count_str = os.environ.get("EMBY_COUNT", "")
           try:
-              emby_count = int(os.environ.get("EMBY_COUNT", "1"))
+              emby_count = int(emby_count_str) if emby_count_str else 0  # 无配置时视为0
           except ValueError:
-              print("⚠️ EMBY_COUNT不是有效数字，使用默认值1")
-              emby_count = 1
+              print("⚠️ EMBY_COUNT不是有效数字，视为0（不添加新配置）")
+              emby_count = 0
+
+          # 定义行为：仅当emby_count > 1时添加新配置
+          add_new_emby = emby_count > 1
 
           NAME_MAPPING = {
               "Douban": "🐮【推荐】🐮",
@@ -163,14 +167,14 @@ jobs:
               for site in sites:
                   key = site.get("key")
 
-                  # 根据emby_count决定是否保留原Wexemby
+                  # 处理原始Emby配置（Wexemby）
                   if key == "Wexemby":
-                      if emby_count > 2:
-                          print(f"🔍 EMBY_COUNT={emby_count}，跳过原Emby配置")
-                          continue  # 数量>2时删除原配置
+                      if add_new_emby:
+                          print(f"🔍 EMBY_COUNT={emby_count}（>1），跳过原始Emby配置")
+                          continue  # 需要添加新配置时，删除原始配置
                       else:
-                          print(f"🔍 EMBY_COUNT={emby_count}，保留原Emby配置")
-                          processed_sites.append(site)  # 数量=1时保留原配置
+                          print(f"🔍 EMBY_COUNT={emby_count}（≤1），保留原始Emby配置")
+                          processed_sites.append(site)  # 不添加新配置时，保留原始配置
                           continue
 
                   # 过滤需要删除的key
@@ -201,8 +205,8 @@ jobs:
 
                   processed_sites.append(site)
 
-              # 当emby_count>2时，生成对应数量的新Emby配置
-              if emby_count > 2:
+              # 当需要添加新配置时（emby_count > 1），生成对应数量的新Emby
+              if add_new_emby:
                   print(f"📌 生成{emby_count}个新Emby配置")
                   for i in range(1, emby_count + 1):
                       new_emby = {
