@@ -1,6 +1,9 @@
 name: IPTV
 
+# 触发条件：每小时运行 + 推送到main分支 + 手动触发
 on:
+  schedule:
+    - cron: "0 * * * *"  # 每小时的0分执行（UTC时间，若需北京时间需+8小时，如"0 8-23 * * *"不对，直接用UTC的0分对应北京时间8点等）
   push:
     branches: [ main ]
   workflow_dispatch:
@@ -14,7 +17,6 @@ jobs:
       - name: 检查环境依赖
         run: |
           echo "当前运行环境: $(uname -a)"
-          # 确保curl和sed已安装
           which curl || (sudo apt update && sudo apt install -y curl)
           which sed || (sudo apt update && sudo apt install -y sed)
 
@@ -23,7 +25,7 @@ jobs:
           curl -sSL "https://raw.githubusercontent.com/mursor1985/LIVE/refs/heads/main/iptv.m3u" -o iptv.m3u
           if [ -f "iptv.m3u" ]; then
             echo "✅ 原始文件下载成功，大小: $(du -h iptv.m3u)"
-            head -n 10 iptv.m3u  # 显示前10行确认格式
+            head -n 10 iptv.m3u
           else
             echo "❌ 文件下载失败"
             exit 1
@@ -32,17 +34,12 @@ jobs:
       - name: 处理文件（仅删除group-title为"4K频道"和"其他"的频道）
         run: |
           echo "🔧 开始处理文件..."
-          
-          # 原理：IPTV频道格式为两行一组（#EXTINF行 + 链接行）
-          # 匹配包含 group-title="4K频道" 的#EXTINF行，同时删除其下一行（链接行）
+          # 删除group-title="4K频道"的频道（含信息行和链接行）
           sed -i '/group-title="4K频道"/{N;d}' iptv.m3u
-          
-          # 同样删除 group-title="其他" 的频道（#EXTINF行 + 链接行）
+          # 删除group-title="其他"的频道（含信息行和链接行）
           sed -i '/group-title="其他"/{N;d}' iptv.m3u
           
-          # 验证处理结果
           echo "✅ 文件处理完成，处理后大小: $(du -h iptv.m3u)"
-          echo "处理后前10行内容："
           head -n 10 iptv.m3u
 
       - name: 上传处理后的文件至凯速平台
@@ -51,33 +48,6 @@ jobs:
         run: |
           set -euxo pipefail
           echo "📤 开始上传 $IPTV_FILE 至凯速平台"
-          curl -sSf --retry 3 \
-            -F "file=@$IPTV_FILE" \
-            "https://upload.kstore.space/upload/${{ secrets.KSTORE_ID }}?access_token=${{ secrets.KSTORE_TOKEN }}"
-          echo "✅ 上传完成"
-        run: |
-          echo "🔧 开始处理文件..."
-          
-          # 删除4K频道分类（匹配以#EXTGRP:4K频道开头的分组，包含其下所有频道）
-          # 原理：从#EXTGRP:4K频道开始，直到下一个分组（#EXTGRP:）前的内容全部删除
-          sed -i -e '/^#EXTGRP:4K频道/{:a' -e 'N;/^#EXTGRP:/!ba' -e 'd}' iptv.m3u
-          
-          # 删除其他分类（请将"其他分类名称"替换为实际需要删除的分类，如"测试频道"、"无用频道"等）
-          # 如需删除多个分类，复制此行并修改分类名称即可
-          sed -i -e '/^#EXTGRP:其他分类名称/{:a' -e 'N;/^#EXTGRP:/!ba' -e 'd}' iptv.m3u
-          
-          # 验证处理结果
-          echo "✅ 文件处理完成，处理后大小: $(du -h iptv.m3u)"
-          # 可选：显示处理后的前10行，确认分类已删除
-          head -n 10 iptv.m3u
-
-      - name: 上传处理后的文件至凯速平台
-        env:
-          IPTV_FILE: "iptv.m3u"  # 处理后的文件路径
-        run: |
-          set -euxo pipefail  # 严格模式：错误时退出并输出详情
-          echo "📤 开始上传 $IPTV_FILE 至凯速平台"
-          # 执行上传命令（使用仓库配置的密钥）
           curl -sSf --retry 3 \
             -F "file=@$IPTV_FILE" \
             "https://upload.kstore.space/upload/${{ secrets.KSTORE_ID }}?access_token=${{ secrets.KSTORE_TOKEN }}"
