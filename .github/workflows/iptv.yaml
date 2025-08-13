@@ -39,6 +39,7 @@ jobs:
           sed -i '/group-title="熊猫"/{N;d}' iptv.m3u
           sed -i '/group-title="印象天下"/{N;d}' iptv.m3u 
           sed -i '/group-title="纪实"/{N;d}' iptv.m3u
+          sed -i '/group-title="地方"/{N;d}' iptv.m3u
          
           # 删除包含cgtndoc-MCP和cgtn-MCP标识的频道（含信息行和链接行）
           sed -i '/cgtnar-MCP/{N;d}' iptv.m3u
@@ -47,6 +48,15 @@ jobs:
           sed -i '/cgtnfr-MCP/{N;d}' iptv.m3u
           sed -i '/cgtnru-MCP/{N;d}' iptv.m3u
           sed -i '/cgtnsp-MCP/{N;d}' iptv.m3u
+          sed -i '/CGTN外语纪录/{N;d}' iptv.m3u
+          sed -i '/CGTN阿拉伯语/{N;d}' iptv.m3u
+          sed -i '/CGTN西班牙语/{N;d}' iptv.m3u
+          sed -i '/CGTN法语/{N;d}' iptv.m3u
+          sed -i '/CGTN俄语/{N;d}' iptv.m3u
+          sed -i '/中学生/{N;d}' iptv.m3u
+          sed -i '/CGTN/{N;d}' iptv.m3u
+          
+          
           echo "✅ 文件处理完成，处理后大小: $(du -h iptv.m3u)"
           head -n 10 iptv.m3u
 
