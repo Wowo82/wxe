@@ -1,0 +1,63 @@
+name: IPTV
+
+# 触发条件：每次推送到main分支时运行，或手动触发
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  process-and-upload-iptv:
+    runs-on: ubuntu-latest
+    environment: production  # 关联环境变量和密钥
+    
+    steps:
+      - name: 检查环境依赖
+        run: |
+          echo "当前运行环境: $(uname -a)"
+          # 确保curl和sed已安装（sed用于处理文件）
+          which curl || (sudo apt update && sudo apt install -y curl)
+          which sed || (sudo apt update && sudo apt install -y sed)
+
+      - name: 下载原始iptv.m3u文件
+        run: |
+          # 从目标URL下载文件
+          curl -sSL "https://raw.githubusercontent.com/mursor1985/LIVE/refs/heads/main/iptv.m3u" -o iptv.m3u
+          # 验证下载结果
+          if [ -f "iptv.m3u" ]; then
+            echo "✅ 原始文件下载成功，大小: $(du -h iptv.m3u)"
+            # 可选：显示前10行确认格式
+            head -n 10 iptv.m3u
+          else
+            echo "❌ 文件下载失败"
+            exit 1
+          fi
+
+      - name: 处理文件（删除4K频道及其他分类）
+        run: |
+          echo "🔧 开始处理文件..."
+          
+          # 删除4K频道分类（匹配以#EXTGRP:4K频道开头的分组，包含其下所有频道）
+          # 原理：从#EXTGRP:4K频道开始，直到下一个分组（#EXTGRP:）前的内容全部删除
+          sed -i -e '/^#EXTGRP:4K频道/{:a' -e 'N;/^#EXTGRP:/!ba' -e 'd}' iptv.m3u
+          
+          # 删除其他分类（请将"其他分类名称"替换为实际需要删除的分类，如"测试频道"、"无用频道"等）
+          # 如需删除多个分类，复制此行并修改分类名称即可
+          sed -i -e '/^#EXTGRP:其他分类名称/{:a' -e 'N;/^#EXTGRP:/!ba' -e 'd}' iptv.m3u
+          
+          # 验证处理结果
+          echo "✅ 文件处理完成，处理后大小: $(du -h iptv.m3u)"
+          # 可选：显示处理后的前10行，确认分类已删除
+          head -n 10 iptv.m3u
+
+      - name: 上传处理后的文件至凯速平台
+        env:
+          IPTV_FILE: "iptv.m3u"  # 处理后的文件路径
+        run: |
+          set -euxo pipefail  # 严格模式：错误时退出并输出详情
+          echo "📤 开始上传 $IPTV_FILE 至凯速平台"
+          # 执行上传命令（使用仓库配置的密钥）
+          curl -sSf --retry 3 \
+            -F "file=@$IPTV_FILE" \
+            "https://upload.kstore.space/upload/${{ secrets.KSTORE_ID }}?access_token=${{ secrets.KSTORE_TOKEN }}"
+          echo "✅ 上传完成"
