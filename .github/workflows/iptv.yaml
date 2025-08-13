@@ -38,7 +38,8 @@ jobs:
           sed -i '/group-title="4K频道"/{N;d}' iptv.m3u
           # 删除group-title="其他"的频道（含信息行和链接行）
           sed -i '/group-title="其他"/{N;d}' iptv.m3u
-          
+          sed -i '/group-title="熊猫"/{N;d}' iptv.m3u
+          sed -i '/group-title="印象天下"/{N;d}' iptv.m3u          
           echo "✅ 文件处理完成，处理后大小: $(du -h iptv.m3u)"
           head -n 10 iptv.m3u
 
