@@ -1,9 +1,8 @@
 name: IPTV
 
-# 触发条件：每小时运行 + 推送到main分支 + 手动触发
 on:
   schedule:
-    - cron: "0 * * * *"  # 每小时的0分执行（UTC时间，若需北京时间需+8小时，如"0 8-23 * * *"不对，直接用UTC的0分对应北京时间8点等）
+    - cron: "0 * * * *"  # 每小时的0分执行（UTC时间）
   push:
     branches: [ main ]
   workflow_dispatch:
@@ -12,7 +11,7 @@ jobs:
   process-and-upload-iptv:
     runs-on: ubuntu-latest
     environment: production
-    
+
     steps:
       - name: 检查环境依赖
         run: |
@@ -31,15 +30,23 @@ jobs:
             exit 1
           fi
 
-      - name: 处理文件（仅删除group-title为"4K频道"和"其他"的频道）
+      - name: 处理文件（删除指定频道）
         run: |
           echo "🔧 开始处理文件..."
-          # 删除group-title="4K频道"的频道（含信息行和链接行）
+          # 删除group-title为指定分类的频道（含信息行和链接行）
           sed -i '/group-title="4K频道"/{N;d}' iptv.m3u
-          # 删除group-title="其他"的频道（含信息行和链接行）
           sed -i '/group-title="其他"/{N;d}' iptv.m3u
           sed -i '/group-title="熊猫"/{N;d}' iptv.m3u
-          sed -i '/group-title="印象天下"/{N;d}' iptv.m3u          
+          sed -i '/group-title="印象天下"/{N;d}' iptv.m3u 
+          sed -i '/group-title="纪实"/{N;d}' iptv.m3u
+         
+          # 删除包含cgtndoc-MCP和cgtn-MCP标识的频道（含信息行和链接行）
+          sed -i '/cgtnar-MCP/{N;d}' iptv.m3u
+          sed -i '/cgtndoc-MCP/{N;d}' iptv.m3u
+          sed -i '/cgtn-MCP/{N;d}' iptv.m3u
+          sed -i '/cgtnfr-MCP/{N;d}' iptv.m3u
+          sed -i '/cgtnru-MCP/{N;d}' iptv.m3u
+          sed -i '/cgtnsp-MCP/{N;d}' iptv.m3u
           echo "✅ 文件处理完成，处理后大小: $(du -h iptv.m3u)"
           head -n 10 iptv.m3u
 
